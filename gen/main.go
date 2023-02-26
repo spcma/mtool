@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
+	"github.com/spf13/cast"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"log"
@@ -13,87 +14,47 @@ import (
 )
 
 var (
-	path       string // 文件保存路径
-	dbUser     string // 用户名
-	dbPwd      string // 密码
-	dbHost     string // 数据库ip地址
-	dbPort     string // port
-	dbName     string
-	dbSchema   string //
-	tableNames string //
+	path     string // 文件保存路径
+	username string // 用户名
+	pwd      string // 密码
+	host     string // 数据库ip地址
+	port     string // port
+	database string
+	tables   string //
 )
 
-// use
+// load package
 // go get -u -v golang.org/x/tools/cmd/goimports
 // go install golang.org/x/tools/cmd/goimports
 
-// go run db2struct.go -db [dbname] -sc [schema] -user [admin] -host [host] -port [port] -pwd [password]
+// go run main.go -db [dbname] -sc [schema] -user [admin] -host [host] -port [port] -pwd [password]
 
-// 注释：参数信息
-//
-// -host host 改为自己数据库的地址 （ 默认 127.0.0.1）
-//
-// -port port 改为自己数据库的端口 （ 默认 5432）
-//
-// -user user 改为自己数据库的账号 （ 默认 postgres）
-//
-// -pwd pwd 改为自己数据库的密码 （ 默认 postgres）
-//
-// -db dbname 改为自己数据库的名称 （必填）
-//
-// -sc schema 改为自己数据库的名称 （public）
-//
-// -path ./models 改为存放路径 (可选默认为./models )
-//
-// -t account,user 改为要生成的表名称、可多个 (可选默认全部生成)
 func init() {
-	flag.StringVar(&dbHost, "host", "127.0.0.1", "# Database host")
-	flag.StringVar(&dbPort, "port", "3306", "# Database port")
-	flag.StringVar(&dbName, "db", "test", "# Database name")
-	flag.StringVar(&dbSchema, "sc", "test", "# schema name")
-	flag.StringVar(&dbUser, "user", "admin", "# Database account")
-	flag.StringVar(&dbPwd, "pwd", "admin@123", "# Database password")
-	flag.StringVar(&tableNames, "t", "", "# Table name formats such as - t user, rule, config")
-	flag.StringVar(&path, "path", "./model", "# Structure preservation path")
+	flag.StringVar(&username, "user", "xxx", "# Database account")
+	flag.StringVar(&pwd, "pwd", "xxx", "# Database password")
+	flag.StringVar(&host, "host", "127.0.0.1", "# Database host")
+	flag.StringVar(&port, "port", "3306", "# Database port")
+	flag.StringVar(&database, "db", "xxx", "# Database name")
+	flag.StringVar(&tables, "t", "", "# Table name formats such as - t user, rule, config")
+	flag.StringVar(&path, "path", "xxx", "# Structure preservation path")
 }
 
-var baseFields = []string{"id", "create_time", "update_time", "create_user", "update_user", "delete_user"}
-
-func initVar() {
-	// 文件保存路径 改第二个值
-	path = "./models"
-	// 用户名
-	dbUser = "admin"
-	// 密码
-	dbPwd = "admin@123"
-	// 数据库ip地址
-	dbHost = "127.0.0.1"
-	dbPort = "3306"
-	dbName = "test"
-}
+//var baseFields = []string{"id", "create_time", "update_time", "create_user", "update_user", "delete_user"}
 
 func main() {
 	flag.Parse()
-	// initVar()
-	if len(dbName) == 0 {
-		flag.Usage()
+
+	if len(host) == 0 || len(port) == 0 || len(username) == 0 || len(pwd) == 0 || len(database) == 0 {
 		return
 	}
 
+	//initVar()
+
 	//	convert aa,bb to 'aa','bb'
-	tableNames = convtables(tableNames) // 转换
+	tables = convtables(tables) // 转换
 
-	fmt.Println("地址:", dbHost)
-	fmt.Println("端口:", dbPort)
-	fmt.Println("数据库:", dbName)
-	fmt.Println("模式名:", dbSchema)
-	fmt.Println("数据库账号:", dbUser)
-	fmt.Println("数据库密码:", dbPwd)
-	fmt.Println("结构体保存路径:", path)
-	fmt.Println("指定数生成据表:", tableNames)
-	fmt.Println("正在启动生成结构体....")
+	fmt.Println("正在启动生成结构体...")
 
-	//	core generate function
 	execGenStruct()
 
 	var err error
@@ -122,20 +83,30 @@ func execGenStruct() {
 	}
 
 	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8&parseTime=True&loc=Local",
-		"spcmaadmin",
-		"admin@123",
-		"101.35.184.189",
-		13306,
-		"spcma",
+		username,
+		pwd,
+		host,
+		cast.ToInt(port),
+		database,
 	)
+
+	fmt.Println(dsn)
 
 	orm, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
 	if err != nil {
 		panic("failed to connect database")
 	}
 
+	sql := `
+		SELECT TABLE_NAME,column_name, data_type, column_comment, is_nullable 
+		FROM information_schema.COLUMNS 
+		WHERE table_schema = '%s'
+	`
+
+	searchTablesSql := fmt.Sprintf(sql, database)
+
 	var fs []FieldInfo
-	orm.Raw("SELECT TABLE_NAME,column_name, data_type, column_comment, is_nullable FROM information_schema.COLUMNS where table_schema = 'spcma'").Find(&fs)
+	orm.Raw(searchTablesSql).Find(&fs)
 
 	if len(fs) > 0 {
 		genModelStruct(fs)
@@ -162,11 +133,9 @@ func genModelStruct(fs []FieldInfo) {
 			buffer.WriteString("string ")
 		case "date", "datetime", "timestamp":
 			buffer.WriteString("time.Time ")
-			// buffer.WriteString("time.Time ")
 		case "double", "float", "numeric":
 			buffer.WriteString("float64 ")
 		default:
-			// 其他类型当成string处理
 			buffer.WriteString("string ")
 		}
 	}
@@ -207,8 +176,17 @@ func genModelStruct(fs []FieldInfo) {
 		writeTableNameFunc(preTableName)
 		filename := path + "\\" + preTableName + ".go"
 		f, _ := os.Create(filename)
-		f.Write([]byte(buffer.String()))
-		f.Close()
+		_, err := f.Write([]byte(buffer.String()))
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		defer func(f *os.File) {
+			err = f.Close()
+			if err != nil {
+				fmt.Println(err)
+			}
+		}(f)
 	}
 
 	//	字段个数
