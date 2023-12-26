@@ -1,4 +1,4 @@
-module github.com/spcma/open-repo
+module github.com/spcma/mtool
 
 go 1.19
 
